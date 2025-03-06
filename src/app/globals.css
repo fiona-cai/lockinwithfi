@@ -5,3 +5,39 @@
 .gradient-background {
   background: radial-gradient(circle at center, #E2EFE2, #FFFFFF);
 }
+
+/* Calendar specific styles */
+.calendar-event {
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  transition: transform 0.2s;
+}
+
+.calendar-event:hover {
+  transform: scale(1.02);
+}
+
+.time-column {
+  min-width: 80px;
+}
+
+.day-column {
+  min-width: 120px;
+}
+
+/* Custom scrollbar */
+.calendar-grid::-webkit-scrollbar {
+  width: 8px;
+}
+
+.calendar-grid::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+
+.calendar-grid::-webkit-scrollbar-thumb {
+  background: #888;
+  border-radius: 4px;
+}
+
+.calendar-grid::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}
