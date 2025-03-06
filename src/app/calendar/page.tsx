@@ -70,25 +70,63 @@ export default function Calendar() {
     try {
       setIsLoading(true);
       setError(null);
+      console.log('Sending task data:', taskData);
+      
       const response = await fetch('/api/tasks', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(taskData),
+        body: JSON.stringify({
+          ...taskData,
+          startDate: taskData.startDate.toISOString(),
+          deadline: taskData.deadline?.toISOString(),
+        }),
       });
 
+      const text = await response.text();
+      console.log('Response text:', text);
+
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to create task');
+        console.error('Error response:', {
+          status: response.status,
+          statusText: response.statusText,
+          body: text,
+        });
+        let errorMessage = `Server error: ${response.status} ${response.statusText}`;
+        try {
+          const errorData = JSON.parse(text);
+          if (errorData.error) {
+            errorMessage = errorData.error;
+            if (errorData.details) {
+              errorMessage += ': ' + JSON.stringify(errorData.details);
+            } else if (errorData.message) {
+              errorMessage += ': ' + errorData.message;
+            }
+          }
+        } catch (e) {
+          console.error('Error parsing error response:', e);
+        }
+        throw new Error(errorMessage);
       }
 
-      // Refresh tasks
+      let data;
+      try {
+        data = JSON.parse(text);
+        console.log('Task created:', data);
+      } catch (e) {
+        console.error('Error parsing success response:', e);
+        throw new Error('Invalid response from server: ' + text.substring(0, 100));
+      }
+
       await fetchTasks();
       setIsAddTaskModalOpen(false);
+      return data;
     } catch (error) {
       console.error('Error creating task:', error);
-      setError(error instanceof Error ? error.message : 'Failed to create task');
+      const errorMessage = error instanceof Error ? error.message : 'Failed to create task';
+      setError(errorMessage);
+      throw new Error(errorMessage);
     } finally {
       setIsLoading(false);
     }

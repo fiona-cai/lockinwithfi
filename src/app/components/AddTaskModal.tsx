@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import DatePicker from 'react-datepicker';
 import "react-datepicker/dist/react-datepicker.css";
 import { z } from 'zod';
@@ -34,12 +34,62 @@ export default function AddTaskModal({ isOpen, onClose, onSave }: AddTaskModalPr
   const [tags, setTags] = useState<string[]>([]);
   const [isAutoScheduled, setIsAutoScheduled] = useState(true);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Reset form when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      setTitle('');
+      setStartDate(new Date());
+      setDeadline(null);
+      setDuration('');
+      setMaxTimePerSitting('');
+      setDescription('');
+      setTags([]);
+      setIsAutoScheduled(true);
+      setErrors({});
+      setIsSubmitting(false);
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
+  const handleSave = async () => {
+    if (!validateForm() || isSubmitting) return;
+
+    try {
+      setIsSubmitting(true);
+      setErrors({});
+
+      const formData = {
+        title,
+        startDate: startDate!,
+        deadline: deadline || undefined,
+        duration: parseInt(duration),
+        maxTimePerSitting: maxTimePerSitting ? parseInt(maxTimePerSitting) : undefined,
+        description: description || undefined,
+        tags,
+        isAutoScheduled,
+      };
+
+      console.log('Submitting form data:', formData);
+      await onSave(formData);
+      onClose();
+    } catch (error) {
+      console.error('Error in handleSave:', error);
+      setErrors({ 
+        submit: error instanceof Error 
+          ? error.message 
+          : 'Failed to save task. Please try again.' 
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   const validateForm = (): boolean => {
     try {
-      taskSchema.parse({
+      const validationResult = taskSchema.safeParse({
         title,
         startDate,
         deadline,
@@ -49,35 +99,25 @@ export default function AddTaskModal({ isOpen, onClose, onSave }: AddTaskModalPr
         tags,
         isAutoScheduled,
       });
-      setErrors({});
-      return true;
-    } catch (error) {
-      if (error instanceof z.ZodError) {
+
+      if (!validationResult.success) {
         const newErrors: Record<string, string> = {};
-        error.errors.forEach((err) => {
+        validationResult.error.errors.forEach((err) => {
           if (err.path[0]) {
             newErrors[err.path[0].toString()] = err.message;
           }
         });
+        console.log('Validation errors:', newErrors);
         setErrors(newErrors);
+        return false;
       }
-      return false;
-    }
-  };
 
-  const handleSave = () => {
-    if (validateForm()) {
-      onSave({
-        title,
-        startDate: startDate!,
-        deadline: deadline || undefined,
-        duration: parseInt(duration),
-        maxTimePerSitting: maxTimePerSitting ? parseInt(maxTimePerSitting) : undefined,
-        description,
-        tags,
-        isAutoScheduled,
-      });
-      onClose();
+      setErrors({});
+      return true;
+    } catch (error) {
+      console.error('Error in validateForm:', error);
+      setErrors({ submit: 'Validation error occurred' });
+      return false;
     }
   };
 
@@ -243,12 +283,21 @@ export default function AddTaskModal({ isOpen, onClose, onSave }: AddTaskModalPr
           </div>
         </div>
 
+        {errors.submit && (
+          <div className="text-red-500 text-sm mb-4">{errors.submit}</div>
+        )}
+
         {/* Save Button */}
         <button
           onClick={handleSave}
-          className="w-full py-3 bg-[#4A5D4A] text-white rounded-lg hover:bg-[#3E4E3E] transition-colors"
+          disabled={isSubmitting}
+          className={`w-full py-3 text-white rounded-lg transition-colors ${
+            isSubmitting 
+              ? 'bg-gray-400 cursor-not-allowed' 
+              : 'bg-[#4A5D4A] hover:bg-[#3E4E3E]'
+          }`}
         >
-          Add Task
+          {isSubmitting ? 'Adding Task...' : 'Add Task'}
         </button>
       </div>
     </div>
