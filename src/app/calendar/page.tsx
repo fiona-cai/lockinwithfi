@@ -1,16 +1,31 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { format, addDays, startOfWeek } from 'date-fns';
+import { format, addDays, startOfWeek, parseISO, isSameDay } from 'date-fns';
 import Link from 'next/link';
 import AddTaskModal from '../components/AddTaskModal';
 
 const HOURS = Array.from({ length: 17 }, (_, i) => i + 7); // 7 AM to 11 PM
 
+interface Task {
+  id: string;
+  title: string;
+  startDate: string;
+  duration: number;
+  tags: Array<{ name: string }>;
+  scheduledBlocks: Array<{
+    startTime: string;
+    endTime: string;
+  }>;
+}
+
 export default function Calendar() {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [currentTime, setCurrentTime] = useState(new Date());
   const [isAddTaskModalOpen, setIsAddTaskModalOpen] = useState(false);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   
   // Update current time every minute
   useEffect(() => {
@@ -20,6 +35,29 @@ export default function Calendar() {
     return () => clearInterval(interval);
   }, []);
 
+  // Fetch tasks
+  useEffect(() => {
+    fetchTasks();
+  }, []);
+
+  const fetchTasks = async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+      const response = await fetch('/api/tasks');
+      if (!response.ok) {
+        throw new Error('Failed to fetch tasks');
+      }
+      const data = await response.json();
+      setTasks(data);
+    } catch (error) {
+      console.error('Error fetching tasks:', error);
+      setError('Failed to load tasks. Please try again later.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const weekStart = startOfWeek(currentDate);
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
 
@@ -28,28 +66,50 @@ export default function Calendar() {
   const currentMinute = currentTime.getMinutes();
   const timePosition = ((currentHour - 7) * 80) + (currentMinute / 60) * 80;
 
-  // Sample events - in a real app, these would come from a database
-  const events = [
-    {
-      title: "Practice Piano",
-      startTime: "11:00 AM",
-      endTime: "12:00 PM",
-      color: "bg-[#B146C2]", // Exact purple from design
-    },
-    {
-      title: "Study for Chemistry Final",
-      startTime: "1:00 PM",
-      endTime: "2:30 PM",
-      color: "bg-[#2E7DD1]", // Exact blue from design
-    }
-  ];
+  const handleAddTask = async (taskData: any) => {
+    try {
+      setIsLoading(true);
+      setError(null);
+      const response = await fetch('/api/tasks', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(taskData),
+      });
 
-  const handleAddTask = (taskData: any) => {
-    // Here we would typically:
-    // 1. Validate the data
-    // 2. Send it to the database
-    // 3. Update the UI with the new task
-    console.log('New task:', taskData);
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to create task');
+      }
+
+      // Refresh tasks
+      await fetchTasks();
+      setIsAddTaskModalOpen(false);
+    } catch (error) {
+      console.error('Error creating task:', error);
+      setError(error instanceof Error ? error.message : 'Failed to create task');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const getEventStyle = (block: { startTime: string; endTime: string }) => {
+    const start = parseISO(block.startTime);
+    const end = parseISO(block.endTime);
+    const startHour = start.getHours();
+    const startMinute = start.getMinutes();
+    const durationMinutes = (end.getTime() - start.getTime()) / (1000 * 60);
+
+    return {
+      top: `${((startHour - 7) * 80) + (startMinute / 60) * 80}px`,
+      height: `${(durationMinutes / 60) * 80}px`,
+    };
+  };
+
+  const getRandomColor = () => {
+    const colors = ['bg-[#B146C2]', 'bg-[#2E7DD1]', 'bg-[#4A5D4A]'];
+    return colors[Math.floor(Math.random() * colors.length)];
   };
 
   return (
@@ -127,54 +187,67 @@ export default function Calendar() {
         {/* Calendar Grid */}
         <div className="flex-1 flex overflow-hidden">
           <div className="flex-1 overflow-y-auto">
-            <div className="grid grid-cols-8 divide-x divide-gray-200 min-h-full">
-              {/* Time column */}
-              <div className="col-span-1 sticky left-0 bg-white">
-                {HOURS.map((hour) => (
-                  <div key={hour} className="h-20 text-right pr-4 text-sm text-gray-500 pt-2">
-                    {hour === 12 ? '12 PM' : hour > 12 ? `${hour-12} PM` : `${hour} AM`}
-                  </div>
-                ))}
+            {isLoading ? (
+              <div className="flex items-center justify-center h-full">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#4A5D4A]"></div>
               </div>
-
-              {/* Days columns */}
-              {weekDays.map((day) => (
-                <div key={day.toString()} className="col-span-1 relative">
-                  <div className="text-center py-3 border-b border-gray-200 sticky top-0 bg-white z-20">
-                    <div className="text-sm text-gray-500">{format(day, 'EEE')}</div>
-                    <div className="text-lg font-medium">{format(day, 'd')}</div>
-                  </div>
-                  {/* Time slots */}
+            ) : error ? (
+              <div className="flex items-center justify-center h-full text-red-500">
+                {error}
+              </div>
+            ) : (
+              <div className="grid grid-cols-8 divide-x divide-gray-200 min-h-full">
+                {/* Time column */}
+                <div className="col-span-1 sticky left-0 bg-white">
                   {HOURS.map((hour) => (
-                    <div key={hour} className="h-20 border-b border-gray-100"></div>
-                  ))}
-                  {/* Current time indicator */}
-                  {format(day, 'yyyy-MM-dd') === format(currentTime, 'yyyy-MM-dd') && (
-                    <div 
-                      className="absolute left-0 right-0 flex items-center z-10"
-                      style={{ top: `${timePosition}px` }}
-                    >
-                      <div className="w-2 h-2 rounded-full bg-red-500 -ml-1"></div>
-                      <div className="flex-1 h-[2px] bg-red-500"></div>
-                    </div>
-                  )}
-                  {/* Event cards - positioned absolutely */}
-                  {events.map((event, index) => (
-                    <div
-                      key={index}
-                      className={`absolute left-1 right-1 ${event.color} text-white rounded-lg p-2 text-sm shadow-sm hover:shadow-md transition-shadow`}
-                      style={{
-                        top: '240px', // This would be calculated based on event time
-                        height: '80px', // This would be calculated based on event duration
-                      }}
-                    >
-                      <div className="font-medium">{event.title}</div>
-                      <div className="text-xs opacity-90">{`${event.startTime} - ${event.endTime}`}</div>
+                    <div key={hour} className="h-20 text-right pr-4 text-sm text-gray-500 pt-2">
+                      {hour === 12 ? '12 PM' : hour > 12 ? `${hour-12} PM` : `${hour} AM`}
                     </div>
                   ))}
                 </div>
-              ))}
-            </div>
+
+                {/* Days columns */}
+                {weekDays.map((day) => (
+                  <div key={day.toString()} className="col-span-1 relative">
+                    <div className="text-center py-3 border-b border-gray-200 sticky top-0 bg-white z-20">
+                      <div className="text-sm text-gray-500">{format(day, 'EEE')}</div>
+                      <div className="text-lg font-medium">{format(day, 'd')}</div>
+                    </div>
+                    {/* Time slots */}
+                    {HOURS.map((hour) => (
+                      <div key={hour} className="h-20 border-b border-gray-100"></div>
+                    ))}
+                    {/* Current time indicator */}
+                    {format(day, 'yyyy-MM-dd') === format(currentTime, 'yyyy-MM-dd') && (
+                      <div 
+                        className="absolute left-0 right-0 flex items-center z-10"
+                        style={{ top: `${timePosition}px` }}
+                      >
+                        <div className="w-2 h-2 rounded-full bg-red-500 -ml-1"></div>
+                        <div className="flex-1 h-[2px] bg-red-500"></div>
+                      </div>
+                    )}
+                    {/* Task blocks */}
+                    {tasks.map((task) => (
+                      task.scheduledBlocks
+                        .filter(block => isSameDay(parseISO(block.startTime), day))
+                        .map((block, blockIndex) => (
+                          <div
+                            key={`${task.id}-${blockIndex}`}
+                            className={`absolute left-1 right-1 ${getRandomColor()} text-white rounded-lg p-2 text-sm shadow-sm hover:shadow-md transition-shadow`}
+                            style={getEventStyle(block)}
+                          >
+                            <div className="font-medium">{task.title}</div>
+                            <div className="text-xs opacity-90">
+                              {format(parseISO(block.startTime), 'h:mm a')} - {format(parseISO(block.endTime), 'h:mm a')}
+                            </div>
+                          </div>
+                        ))
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Right Sidebar */}
@@ -183,18 +256,37 @@ export default function Calendar() {
               <h2 className="font-medium uppercase text-sm text-gray-900">TODAY</h2>
               <div className="text-sm text-gray-500 mt-1">{format(new Date(), 'M/d/yyyy')}</div>
             </div>
-            {/* Upcoming events list */}
-            <div className="space-y-6">
-              {events.map((event, index) => (
-                <div key={index} className="flex items-start gap-3">
-                  <div className={`w-2 h-2 rounded-full mt-1.5 ${event.color.replace('bg-', 'bg-')}`}></div>
-                  <div>
-                    <div className="text-sm text-gray-500">{event.startTime} - {event.endTime}</div>
-                    <div className="font-medium text-gray-900">{event.title}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
+            {/* Upcoming tasks list */}
+            {isLoading ? (
+              <div className="flex justify-center py-4">
+                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-[#4A5D4A]"></div>
+              </div>
+            ) : error ? (
+              <div className="text-sm text-red-500 py-4">{error}</div>
+            ) : tasks.length === 0 ? (
+              <div className="text-sm text-gray-500 py-4">No tasks scheduled for today</div>
+            ) : (
+              <div className="space-y-6">
+                {tasks
+                  .filter(task => 
+                    task.scheduledBlocks.some(block => 
+                      isSameDay(parseISO(block.startTime), new Date())
+                    )
+                  )
+                  .map((task) => (
+                    <div key={task.id} className="flex items-start gap-3">
+                      <div className={`w-2 h-2 rounded-full mt-1.5 ${getRandomColor()}`}></div>
+                      <div>
+                        <div className="text-sm text-gray-500">
+                          {format(parseISO(task.scheduledBlocks[0].startTime), 'h:mm a')} - 
+                          {format(parseISO(task.scheduledBlocks[0].endTime), 'h:mm a')}
+                        </div>
+                        <div className="font-medium text-gray-900">{task.title}</div>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            )}
           </div>
         </div>
 

@@ -1,35 +1,84 @@
+'use client';
+
 import { useState } from 'react';
+import DatePicker from 'react-datepicker';
+import "react-datepicker/dist/react-datepicker.css";
+import { z } from 'zod';
+
+const taskSchema = z.object({
+  title: z.string().min(1, "Title is required"),
+  startDate: z.date(),
+  deadline: z.date().optional(),
+  duration: z.number().min(1, "Duration is required"),
+  maxTimePerSitting: z.number().optional(),
+  description: z.string().optional(),
+  tags: z.array(z.string()),
+  isAutoScheduled: z.boolean(),
+});
+
+type TaskFormData = z.infer<typeof taskSchema>;
 
 interface AddTaskModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (taskData: any) => void;
+  onSave: (taskData: TaskFormData) => void;
 }
 
 export default function AddTaskModal({ isOpen, onClose, onSave }: AddTaskModalProps) {
   const [title, setTitle] = useState('');
-  const [startDate, setStartDate] = useState('');
-  const [deadline, setDeadline] = useState('');
+  const [startDate, setStartDate] = useState<Date | null>(new Date());
+  const [deadline, setDeadline] = useState<Date | null>(null);
   const [duration, setDuration] = useState('');
   const [maxTimePerSitting, setMaxTimePerSitting] = useState('');
   const [description, setDescription] = useState('');
   const [tags, setTags] = useState<string[]>([]);
   const [isAutoScheduled, setIsAutoScheduled] = useState(true);
+  const [errors, setErrors] = useState<Record<string, string>>({});
 
   if (!isOpen) return null;
 
+  const validateForm = (): boolean => {
+    try {
+      taskSchema.parse({
+        title,
+        startDate,
+        deadline,
+        duration: duration ? parseInt(duration) : 0,
+        maxTimePerSitting: maxTimePerSitting ? parseInt(maxTimePerSitting) : undefined,
+        description,
+        tags,
+        isAutoScheduled,
+      });
+      setErrors({});
+      return true;
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        const newErrors: Record<string, string> = {};
+        error.errors.forEach((err) => {
+          if (err.path[0]) {
+            newErrors[err.path[0].toString()] = err.message;
+          }
+        });
+        setErrors(newErrors);
+      }
+      return false;
+    }
+  };
+
   const handleSave = () => {
-    onSave({
-      title,
-      startDate,
-      deadline,
-      duration,
-      maxTimePerSitting,
-      description,
-      tags,
-      isAutoScheduled,
-    });
-    onClose();
+    if (validateForm()) {
+      onSave({
+        title,
+        startDate: startDate!,
+        deadline: deadline || undefined,
+        duration: parseInt(duration),
+        maxTimePerSitting: maxTimePerSitting ? parseInt(maxTimePerSitting) : undefined,
+        description,
+        tags,
+        isAutoScheduled,
+      });
+      onClose();
+    }
   };
 
   const handleRemoveTag = (tagToRemove: string) => {
@@ -51,34 +100,37 @@ export default function AddTaskModal({ isOpen, onClose, onSave }: AddTaskModalPr
           placeholder="Add Title"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          className="w-full text-xl font-medium mb-6 p-2 border-b border-gray-200 focus:outline-none focus:border-[#4A5D4A]"
+          className={`w-full text-xl font-medium mb-6 p-2 border-b border-gray-200 focus:outline-none focus:border-[#4A5D4A] ${
+            errors.title ? 'border-red-500' : ''
+          }`}
         />
+        {errors.title && <p className="text-red-500 text-sm mt-1">{errors.title}</p>}
 
         <div className="grid grid-cols-2 gap-4 mb-6">
           {/* Start Date */}
           <div>
             <label className="block text-sm text-gray-600 mb-1">Start Date</label>
-            <select 
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
+            <DatePicker
+              selected={startDate}
+              onChange={(date) => setStartDate(date)}
               className="w-full p-2 border rounded-lg focus:outline-none focus:ring-1 focus:ring-[#4A5D4A]"
-            >
-              <option value="">Select start date...</option>
-              {/* Add date options */}
-            </select>
+              dateFormat="MMMM d, yyyy"
+              minDate={new Date()}
+            />
           </div>
 
           {/* Deadline */}
           <div>
             <label className="block text-sm text-gray-600 mb-1">Deadline</label>
-            <select 
-              value={deadline}
-              onChange={(e) => setDeadline(e.target.value)}
+            <DatePicker
+              selected={deadline}
+              onChange={(date) => setDeadline(date)}
               className="w-full p-2 border rounded-lg focus:outline-none focus:ring-1 focus:ring-[#4A5D4A]"
-            >
-              <option value="">Select deadline...</option>
-              {/* Add date options */}
-            </select>
+              dateFormat="MMMM d, yyyy"
+              minDate={startDate || new Date()}
+              isClearable
+              placeholderText="Optional"
+            />
           </div>
 
           {/* Duration */}
@@ -87,14 +139,19 @@ export default function AddTaskModal({ isOpen, onClose, onSave }: AddTaskModalPr
             <select 
               value={duration}
               onChange={(e) => setDuration(e.target.value)}
-              className="w-full p-2 border rounded-lg focus:outline-none focus:ring-1 focus:ring-[#4A5D4A]"
+              className={`w-full p-2 border rounded-lg focus:outline-none focus:ring-1 focus:ring-[#4A5D4A] ${
+                errors.duration ? 'border-red-500' : ''
+              }`}
             >
               <option value="">Select duration...</option>
               <option value="30">30 minutes</option>
               <option value="60">1 hour</option>
               <option value="90">1.5 hours</option>
               <option value="120">2 hours</option>
+              <option value="180">3 hours</option>
+              <option value="240">4 hours</option>
             </select>
+            {errors.duration && <p className="text-red-500 text-sm mt-1">{errors.duration}</p>}
           </div>
 
           {/* Max Time Per Sitting */}
@@ -105,7 +162,7 @@ export default function AddTaskModal({ isOpen, onClose, onSave }: AddTaskModalPr
               onChange={(e) => setMaxTimePerSitting(e.target.value)}
               className="w-full p-2 border rounded-lg focus:outline-none focus:ring-1 focus:ring-[#4A5D4A]"
             >
-              <option value="">Select max time...</option>
+              <option value="">No limit</option>
               <option value="30">30 minutes</option>
               <option value="60">1 hour</option>
               <option value="90">1.5 hours</option>
@@ -142,7 +199,7 @@ export default function AddTaskModal({ isOpen, onClose, onSave }: AddTaskModalPr
               </span>
             ))}
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             <button
               onClick={() => handleAddTag('Collection')}
               className="px-3 py-1 border rounded-full text-sm hover:bg-gray-50"
@@ -189,9 +246,9 @@ export default function AddTaskModal({ isOpen, onClose, onSave }: AddTaskModalPr
         {/* Save Button */}
         <button
           onClick={handleSave}
-          className="w-full py-3 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors"
+          className="w-full py-3 bg-[#4A5D4A] text-white rounded-lg hover:bg-[#3E4E3E] transition-colors"
         >
-          Save
+          Add Task
         </button>
       </div>
     </div>
