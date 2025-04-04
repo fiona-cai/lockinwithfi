@@ -12,10 +12,12 @@
     "@auth/core": "^0.34.2",
     "@next/swc-darwin-arm64": "^15.2.1",
     "@supabase/supabase-js": "^2.49.1",
+    "@types/react-beautiful-dnd": "^13.1.8",
     "date-fns": "^4.1.0",
     "next": "^15.2.1",
     "next-auth": "^4.24.6",
     "react": "18.2.0",
+    "react-beautiful-dnd": "^13.1.1",
     "react-datepicker": "^8.1.0",
     "react-dom": "18.2.0",
     "zod": "^3.24.2"
