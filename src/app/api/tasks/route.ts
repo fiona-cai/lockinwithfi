@@ -154,4 +154,126 @@ export async function GET() {
       { status: 500 }
     );
   }
+}
+
+export async function PUT(request: Request) {
+  try {
+    const body = await request.json();
+    console.log('Received update request body:', body);
+
+    const validatedData = taskSchema.parse(body);
+    console.log('Validated update data:', validatedData);
+
+    // Get the task ID from the URL
+    const url = new URL(request.url);
+    const taskId = url.pathname.split('/').pop();
+    
+    if (!taskId) {
+      return NextResponse.json(
+        { error: 'Task ID is required' },
+        { status: 400 }
+      );
+    }
+
+    // Get or create the dummy user
+    const dummyEmail = "dummy@example.com";
+    const user = await prisma.user.upsert({
+      where: { email: dummyEmail },
+      update: {},
+      create: {
+        email: dummyEmail,
+        name: "Dummy User",
+      },
+    });
+
+    // Create or get tags
+    const tagPromises = validatedData.tags.map(tagName =>
+      prisma.tag.upsert({
+        where: { name: tagName },
+        update: {},
+        create: { name: tagName },
+      })
+    );
+    const tags = await Promise.all(tagPromises);
+    console.log('Created/updated tags:', tags);
+
+    // Update the task
+    const updatedTask = await prisma.task.update({
+      where: {
+        id: taskId,
+        userId: user.id,
+      },
+      data: {
+        title: validatedData.title,
+        description: validatedData.description,
+        startDate: validatedData.startDate,
+        deadline: validatedData.deadline,
+        duration: validatedData.duration,
+        maxTimePerSitting: validatedData.maxTimePerSitting,
+        isAutoScheduled: validatedData.isAutoScheduled,
+        tags: {
+          set: tags.map(tag => ({ id: tag.id })),
+        },
+      },
+      include: {
+        tags: true,
+        scheduledBlocks: true,
+      },
+    });
+    console.log('Updated task:', updatedTask);
+
+    // If auto-scheduled is enabled, update or create the scheduled block
+    if (validatedData.isAutoScheduled) {
+      const existingBlock = await prisma.scheduledBlock.findFirst({
+        where: { taskId: updatedTask.id },
+      });
+
+      if (existingBlock) {
+        await prisma.scheduledBlock.update({
+          where: { id: existingBlock.id },
+          data: {
+            startTime: validatedData.startDate,
+            endTime: new Date(validatedData.startDate.getTime() + validatedData.duration * 60000),
+          },
+        });
+      } else {
+        await prisma.scheduledBlock.create({
+          data: {
+            startTime: validatedData.startDate,
+            endTime: new Date(validatedData.startDate.getTime() + validatedData.duration * 60000),
+            taskId: updatedTask.id,
+          },
+        });
+      }
+    }
+
+    return NextResponse.json(updatedTask);
+  } catch (error) {
+    console.error('Error in PUT /api/tasks:', error);
+    
+    // Handle Zod validation errors
+    if (error instanceof z.ZodError) {
+      return NextResponse.json(
+        { error: 'Validation error', details: error.errors },
+        { status: 400 }
+      );
+    }
+
+    // Handle Prisma errors
+    if (error instanceof Error && error.message.includes('RecordNotFound')) {
+      return NextResponse.json(
+        { error: 'Task not found' },
+        { status: 404 }
+      );
+    }
+
+    // Handle other errors
+    return NextResponse.json(
+      { 
+        error: 'Failed to update task',
+        message: error instanceof Error ? error.message : 'Unknown error',
+      },
+      { status: 500 }
+    );
+  }
 } 

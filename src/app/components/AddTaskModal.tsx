@@ -22,35 +22,38 @@ interface AddTaskModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSave: (taskData: TaskFormData) => void;
+  initialTask?: TaskFormData;
+  existingTags?: string[];
 }
 
-export default function AddTaskModal({ isOpen, onClose, onSave }: AddTaskModalProps) {
-  const [title, setTitle] = useState('');
-  const [startDate, setStartDate] = useState<Date | null>(new Date());
-  const [deadline, setDeadline] = useState<Date | null>(null);
-  const [duration, setDuration] = useState('');
-  const [maxTimePerSitting, setMaxTimePerSitting] = useState('');
-  const [description, setDescription] = useState('');
-  const [tags, setTags] = useState<string[]>([]);
-  const [isAutoScheduled, setIsAutoScheduled] = useState(true);
+export default function AddTaskModal({ isOpen, onClose, onSave, initialTask, existingTags = [] }: AddTaskModalProps) {
+  const [title, setTitle] = useState(initialTask?.title || '');
+  const [startDate, setStartDate] = useState<Date | null>(initialTask?.startDate || new Date());
+  const [deadline, setDeadline] = useState<Date | null>(initialTask?.deadline || null);
+  const [duration, setDuration] = useState(initialTask?.duration?.toString() || '');
+  const [maxTimePerSitting, setMaxTimePerSitting] = useState(initialTask?.maxTimePerSitting?.toString() || '');
+  const [description, setDescription] = useState(initialTask?.description || '');
+  const [tags, setTags] = useState<string[]>(initialTask?.tags || []);
+  const [isAutoScheduled, setIsAutoScheduled] = useState(initialTask?.isAutoScheduled ?? true);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [newTag, setNewTag] = useState('');
 
-  // Reset form when modal opens
+  // Reset form when modal opens with initialTask
   useEffect(() => {
     if (isOpen) {
-      setTitle('');
-      setStartDate(new Date());
-      setDeadline(null);
-      setDuration('');
-      setMaxTimePerSitting('');
-      setDescription('');
-      setTags([]);
-      setIsAutoScheduled(true);
+      setTitle(initialTask?.title || '');
+      setStartDate(initialTask?.startDate || new Date());
+      setDeadline(initialTask?.deadline || null);
+      setDuration(initialTask?.duration?.toString() || '');
+      setMaxTimePerSitting(initialTask?.maxTimePerSitting?.toString() || '');
+      setDescription(initialTask?.description || '');
+      setTags(initialTask?.tags || []);
+      setIsAutoScheduled(initialTask?.isAutoScheduled ?? true);
       setErrors({});
       setIsSubmitting(false);
     }
-  }, [isOpen]);
+  }, [isOpen, initialTask]);
 
   if (!isOpen) return null;
 
@@ -121,13 +124,21 @@ export default function AddTaskModal({ isOpen, onClose, onSave }: AddTaskModalPr
     }
   };
 
+  const handleAddTag = (tag: string) => {
+    if (!tags.includes(tag)) {
+      setTags([...tags, tag]);
+    }
+    setNewTag('');
+  };
+
   const handleRemoveTag = (tagToRemove: string) => {
     setTags(tags.filter(tag => tag !== tagToRemove));
   };
 
-  const handleAddTag = (tag: string) => {
-    if (!tags.includes(tag)) {
-      setTags([...tags, tag]);
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && newTag.trim()) {
+      e.preventDefault();
+      handleAddTag(newTag.trim());
     }
   };
 
@@ -223,48 +234,65 @@ export default function AddTaskModal({ isOpen, onClose, onSave }: AddTaskModalPr
 
         {/* Tags */}
         <div className="mb-6">
-          <div className="flex flex-wrap gap-2 mb-2">
+          <label className="block text-sm text-gray-600 mb-2">Tags</label>
+          
+          {/* Current Tags */}
+          <div className="flex flex-wrap gap-2 mb-3">
             {tags.map((tag) => (
               <span
                 key={tag}
-                className="px-3 py-1 bg-gray-100 rounded-full text-sm flex items-center gap-2"
+                className="px-3 py-1 bg-[#4A5D4A] text-white rounded-full text-sm flex items-center gap-2"
               >
                 {tag}
                 <button
                   onClick={() => handleRemoveTag(tag)}
-                  className="text-gray-500 hover:text-gray-700"
+                  className="text-white hover:text-gray-200"
                 >
                   ×
                 </button>
               </span>
             ))}
           </div>
-          <div className="flex gap-2 flex-wrap">
+
+          {/* Tag Input */}
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={newTag}
+              onChange={(e) => setNewTag(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Type and press enter to add a tag"
+              className="flex-1 p-2 border rounded-lg focus:outline-none focus:ring-1 focus:ring-[#4A5D4A]"
+            />
             <button
-              onClick={() => handleAddTag('Collection')}
-              className="px-3 py-1 border rounded-full text-sm hover:bg-gray-50"
+              onClick={() => newTag.trim() && handleAddTag(newTag.trim())}
+              className="px-4 py-2 bg-[#4A5D4A] text-white rounded-lg hover:bg-[#3E4E3E]"
             >
-              Collection
-            </button>
-            <button
-              onClick={() => handleAddTag('Chemistry')}
-              className="px-3 py-1 bg-gray-900 text-white rounded-full text-sm"
-            >
-              Chemistry
-            </button>
-            <button
-              onClick={() => handleAddTag('School')}
-              className="px-3 py-1 bg-gray-900 text-white rounded-full text-sm"
-            >
-              School
-            </button>
-            <button
-              onClick={() => handleAddTag('Organic Chemistry')}
-              className="px-3 py-1 bg-gray-900 text-white rounded-full text-sm"
-            >
-              Organic Chemistry
+              Add
             </button>
           </div>
+
+          {/* Available Tags - Only show if there are existing tags */}
+          {existingTags.length > 0 && (
+            <div className="mt-3">
+              <p className="text-sm text-gray-600 mb-2">Available Tags:</p>
+              <div className="flex flex-wrap gap-2">
+                {existingTags.map((tag) => (
+                  <button
+                    key={tag}
+                    onClick={() => handleAddTag(tag)}
+                    className={`px-3 py-1 rounded-full text-sm ${
+                      tags.includes(tag)
+                        ? 'bg-[#4A5D4A] text-white'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                  >
+                    {tag}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Auto-Schedule Option */}
@@ -287,18 +315,29 @@ export default function AddTaskModal({ isOpen, onClose, onSave }: AddTaskModalPr
           <div className="text-red-500 text-sm mb-4">{errors.submit}</div>
         )}
 
-        {/* Save Button */}
-        <button
-          onClick={handleSave}
-          disabled={isSubmitting}
-          className={`w-full py-3 text-white rounded-lg transition-colors ${
-            isSubmitting 
-              ? 'bg-gray-400 cursor-not-allowed' 
-              : 'bg-[#4A5D4A] hover:bg-[#3E4E3E]'
-          }`}
-        >
-          {isSubmitting ? 'Adding Task...' : 'Add Task'}
-        </button>
+        {/* Buttons */}
+        <div className="flex justify-end gap-4 mt-6">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-gray-600 hover:text-gray-800"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={isSubmitting}
+            className="px-4 py-2 bg-[#4A5D4A] text-white rounded-lg hover:bg-[#3E4E3E] disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isSubmitting ? (
+              <div className="flex items-center gap-2">
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                Saving...
+              </div>
+            ) : (
+              initialTask ? 'Save Changes' : 'Save Task'
+            )}
+          </button>
+        </div>
       </div>
     </div>
   );
