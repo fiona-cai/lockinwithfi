@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { prisma } from '@/app/lib/prisma';
 import { z } from 'zod';
+import { prisma } from '@/app/lib/prisma';
 
 const taskSchema = z.object({
   title: z.string().min(1, "Title is required"),
@@ -18,13 +18,11 @@ export async function PUT(
   { params }: { params: { id: string } }
 ) {
   try {
-    const taskId = params.id;
     const body = await request.json();
-    console.log('Received update request:', { taskId, body });
+    console.log('Received update request body:', body);
 
-    // Validate the request body
     const validatedData = taskSchema.parse(body);
-    console.log('Validated data:', validatedData);
+    console.log('Validated update data:', validatedData);
 
     // Get or create the dummy user
     const dummyEmail = "dummy@example.com";
@@ -37,7 +35,7 @@ export async function PUT(
       },
     });
 
-    // Update or create tags
+    // Create or get tags
     const tagPromises = validatedData.tags.map(tagName =>
       prisma.tag.upsert({
         where: { name: tagName },
@@ -46,11 +44,14 @@ export async function PUT(
       })
     );
     const tags = await Promise.all(tagPromises);
-    console.log('Updated/created tags:', tags);
+    console.log('Created/updated tags:', tags);
 
     // Update the task
     const updatedTask = await prisma.task.update({
-      where: { id: taskId },
+      where: {
+        id: params.id,
+        userId: user.id,
+      },
       data: {
         title: validatedData.title,
         description: validatedData.description,
@@ -68,29 +69,38 @@ export async function PUT(
         scheduledBlocks: true,
       },
     });
+    console.log('Updated task:', updatedTask);
 
-    // If auto-scheduled is enabled, update scheduled blocks
+    // If auto-scheduled is enabled, update or create the scheduled block
     if (validatedData.isAutoScheduled) {
-      // Delete existing scheduled blocks
-      await prisma.scheduledBlock.deleteMany({
-        where: { taskId: taskId },
+      const existingBlock = await prisma.scheduledBlock.findFirst({
+        where: { taskId: updatedTask.id },
       });
 
-      // Create new scheduled block
-      const scheduledBlock = await prisma.scheduledBlock.create({
-        data: {
-          startTime: validatedData.startDate,
-          endTime: new Date(validatedData.startDate.getTime() + validatedData.duration * 60000),
-          taskId: taskId,
-        },
-      });
-      console.log('Created new scheduled block:', scheduledBlock);
+      if (existingBlock) {
+        await prisma.scheduledBlock.update({
+          where: { id: existingBlock.id },
+          data: {
+            startTime: validatedData.startDate,
+            endTime: new Date(validatedData.startDate.getTime() + validatedData.duration * 60000),
+          },
+        });
+      } else {
+        await prisma.scheduledBlock.create({
+          data: {
+            startTime: validatedData.startDate,
+            endTime: new Date(validatedData.startDate.getTime() + validatedData.duration * 60000),
+            taskId: updatedTask.id,
+          },
+        });
+      }
     }
 
     return NextResponse.json(updatedTask);
   } catch (error) {
-    console.error('Error updating task:', error);
+    console.error('Error in PUT /api/tasks/[id]:', error);
     
+    // Handle Zod validation errors
     if (error instanceof z.ZodError) {
       return NextResponse.json(
         { error: 'Validation error', details: error.errors },
@@ -98,6 +108,15 @@ export async function PUT(
       );
     }
 
+    // Handle Prisma errors
+    if (error instanceof Error && error.message.includes('RecordNotFound')) {
+      return NextResponse.json(
+        { error: 'Task not found' },
+        { status: 404 }
+      );
+    }
+
+    // Handle other errors
     return NextResponse.json(
       { 
         error: 'Failed to update task',

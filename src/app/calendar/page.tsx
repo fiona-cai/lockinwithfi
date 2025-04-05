@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react';
 import { format, addDays, startOfWeek, parseISO, isSameDay } from 'date-fns';
 import Link from 'next/link';
 import AddTaskModal from '../components/AddTaskModal';
+import EditTaskModal from '../components/EditTaskModal';
+import { DragDropContext, Droppable, Draggable } from 'react-beautiful-dnd';
 
 const HOURS = Array.from({ length: 17 }, (_, i) => i + 7); // 7 AM to 11 PM
 
@@ -27,7 +29,8 @@ export default function Calendar() {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [currentTime, setCurrentTime] = useState(new Date());
   const [isAddTaskModalOpen, setIsAddTaskModalOpen] = useState(false);
-  const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [isEditTaskModalOpen, setIsEditTaskModalOpen] = useState(false);
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -199,6 +202,127 @@ export default function Calendar() {
     return colors[Math.floor(Math.random() * colors.length)];
   };
 
+  const handleTaskDoubleClick = (task: Task) => {
+    setSelectedTask(task);
+    setIsEditTaskModalOpen(true);
+  };
+
+  const handleEditTask = async (taskData: any) => {
+    try {
+      setIsLoading(true);
+      setError(null);
+      
+      console.log('Updating task with data:', taskData);
+      
+      const response = await fetch(`/api/tasks/${taskData.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          ...taskData,
+          startDate: taskData.startDate.toISOString(),
+          deadline: taskData.deadline?.toISOString(),
+        }),
+      });
+
+      const text = await response.text();
+      console.log('Update response:', {
+        status: response.status,
+        statusText: response.statusText,
+        body: text,
+      });
+
+      if (!response.ok) {
+        let errorMessage = `Server error: ${response.status} ${response.statusText}`;
+        try {
+          const errorData = JSON.parse(text);
+          if (errorData.error) {
+            errorMessage = errorData.error;
+            if (errorData.details) {
+              errorMessage += ': ' + JSON.stringify(errorData.details);
+            } else if (errorData.message) {
+              errorMessage += ': ' + errorData.message;
+            }
+          }
+        } catch (e) {
+          console.error('Error parsing error response:', e);
+        }
+        throw new Error(errorMessage);
+      }
+
+      let data;
+      try {
+        data = JSON.parse(text);
+        console.log('Task updated:', data);
+      } catch (e) {
+        console.error('Error parsing success response:', e);
+        throw new Error('Invalid response from server: ' + text.substring(0, 100));
+      }
+
+      await fetchTasks();
+      setIsEditTaskModalOpen(false);
+      return data;
+    } catch (error) {
+      console.error('Error updating task:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to update task';
+      setError(errorMessage);
+      throw error;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleDragEnd = async (result: any) => {
+    if (!result.destination) return;
+
+    const { source, destination } = result;
+    const [taskId, blockStartTime] = result.draggableId.split('-');
+    const task = tasks.find(t => t.id === taskId);
+    
+    if (!task) return;
+
+    const sourceDate = parseISO(source.droppableId);
+    const destDate = parseISO(destination.droppableId);
+    const sourceBlock = task.scheduledBlocks.find(b => 
+      isSameDay(parseISO(b.startTime), sourceDate)
+    );
+    
+    if (!sourceBlock) return;
+
+    const timeDiff = destDate.getTime() - sourceDate.getTime();
+    const newStartTime = new Date(parseISO(sourceBlock.startTime).getTime() + timeDiff);
+    const newEndTime = new Date(parseISO(sourceBlock.endTime).getTime() + timeDiff);
+
+    try {
+      setIsLoading(true);
+      setError(null);
+
+      const response = await fetch(`/api/tasks/${taskId}/reschedule`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          blockId: sourceBlock.id,
+          newStartTime: newStartTime.toISOString(),
+          newEndTime: newEndTime.toISOString(),
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to reschedule task');
+      }
+
+      await fetchTasks();
+    } catch (error) {
+      console.error('Error rescheduling task:', error);
+      setError('Failed to reschedule task. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   return (
     <div className="flex h-screen bg-white overflow-hidden">
       {/* Left Sidebar */}
@@ -283,58 +407,88 @@ export default function Calendar() {
                 {error}
               </div>
             ) : (
-              <div className="grid grid-cols-8 divide-x divide-gray-200 min-h-full">
-                {/* Time column */}
-                <div className="col-span-1 sticky left-0 bg-white">
-                  {HOURS.map((hour) => (
-                    <div key={hour} className="h-20 text-right pr-4 text-sm text-gray-500 pt-2">
-                      {hour === 12 ? '12 PM' : hour > 12 ? `${hour-12} PM` : `${hour} AM`}
-                    </div>
-                  ))}
-                </div>
-
-                {/* Days columns */}
-                {weekDays.map((day, dayIndex) => (
-                  <div key={dayIndex} className="relative">
-                    <div className="text-center py-3 border-b border-gray-200 sticky top-0 bg-white z-20">
-                      <div className="text-sm text-gray-500">{format(day, 'EEE')}</div>
-                      <div className="text-lg font-medium">{format(day, 'd')}</div>
-                    </div>
-                    {/* Time slots */}
+              <DragDropContext onDragEnd={handleDragEnd}>
+                <div className="grid grid-cols-8 divide-x divide-gray-200 min-h-full">
+                  {/* Time column */}
+                  <div className="col-span-1">
                     {HOURS.map((hour) => (
-                      <div key={hour} className="h-20 border-b border-gray-100"></div>
-                    ))}
-                    {/* Current time indicator */}
-                    {format(day, 'yyyy-MM-dd') === format(currentTime, 'yyyy-MM-dd') && (
-                      <div 
-                        className="absolute left-0 right-0 flex items-center z-10"
-                        style={{ top: `${timePosition}px` }}
-                      >
-                        <div className="w-2 h-2 rounded-full bg-red-500 -ml-1"></div>
-                        <div className="flex-1 h-[2px] bg-red-500"></div>
+                      <div key={hour} className="h-20 border-b border-gray-200 flex items-start justify-end pr-2">
+                        <span className="text-sm text-gray-500">{format(new Date().setHours(hour, 0), 'h a')}</span>
                       </div>
-                    )}
-                    {/* Task blocks */}
-                    {tasks.map((task) => (
-                      task.scheduledBlocks
-                        .filter(block => isSameDay(parseISO(block.startTime), day))
-                        .map((block, blockIndex) => (
-                          <div
-                            key={`${task.id}-${blockIndex}`}
-                            className={`absolute left-1 right-1 ${getRandomColor()} text-white rounded-lg p-2 text-sm shadow-sm hover:shadow-md transition-shadow cursor-pointer`}
-                            style={getEventStyle(block)}
-                            onDoubleClick={() => handleTaskDoubleClick(task)}
-                          >
-                            <div className="font-medium">{task.title}</div>
-                            <div className="text-xs opacity-90">
-                              {format(parseISO(block.startTime), 'h:mm a')} - {format(parseISO(block.endTime), 'h:mm a')}
-                            </div>
-                          </div>
-                        ))
                     ))}
                   </div>
-                ))}
-              </div>
+
+                  {/* Day columns */}
+                  {weekDays.map((day) => {
+                    const dayKey = format(day, 'yyyy-MM-dd');
+                    const dayTasks = tasks.filter(task => 
+                      task.scheduledBlocks.some(block => 
+                        isSameDay(parseISO(block.startTime), day)
+                      )
+                    );
+
+                    return (
+                      <Droppable key={dayKey} droppableId={dayKey}>
+                        {(provided) => (
+                          <div
+                            ref={provided.innerRef}
+                            {...provided.droppableProps}
+                            className="col-span-1 relative"
+                          >
+                            <div className="text-center py-3 border-b border-gray-200 sticky top-0 bg-white z-20">
+                              <div className="text-sm text-gray-500">{format(day, 'EEE')}</div>
+                              <div className="text-lg font-medium">{format(day, 'd')}</div>
+                            </div>
+                            {/* Time slots */}
+                            {HOURS.map((hour) => (
+                              <div key={hour} className="h-20 border-b border-gray-200" />
+                            ))}
+                            {/* Current time indicator */}
+                            {format(day, 'yyyy-MM-dd') === format(currentTime, 'yyyy-MM-dd') && (
+                              <div 
+                                className="absolute left-0 right-0 flex items-center z-10"
+                                style={{ top: `${timePosition}px` }}
+                              >
+                                <div className="w-2 h-2 rounded-full bg-red-500 -ml-1"></div>
+                                <div className="flex-1 h-[2px] bg-red-500"></div>
+                              </div>
+                            )}
+                            {/* Task blocks */}
+                            {dayTasks.map((task, index) => (
+                              <Draggable
+                                key={`${task.id}-${task.scheduledBlocks[0].startTime}`}
+                                draggableId={`${task.id}-${task.scheduledBlocks[0].startTime}`}
+                                index={index}
+                              >
+                                {(provided) => (
+                                  <div
+                                    ref={provided.innerRef}
+                                    {...provided.draggableProps}
+                                    {...provided.dragHandleProps}
+                                    onDoubleClick={() => handleTaskDoubleClick(task)}
+                                    className={`absolute left-0 right-0 ${getRandomColor()} text-white rounded-lg p-2 cursor-move`}
+                                    style={{
+                                      ...getEventStyle(task.scheduledBlocks[0]),
+                                      ...provided.draggableProps.style,
+                                    }}
+                                  >
+                                    <div className="text-sm font-medium truncate">{task.title}</div>
+                                    <div className="text-xs opacity-80">
+                                      {format(parseISO(task.scheduledBlocks[0].startTime), 'h:mm a')} -{' '}
+                                      {format(parseISO(task.scheduledBlocks[0].endTime), 'h:mm a')}
+                                    </div>
+                                  </div>
+                                )}
+                              </Draggable>
+                            ))}
+                            {provided.placeholder}
+                          </div>
+                        )}
+                      </Droppable>
+                    );
+                  })}
+                </div>
+              </DragDropContext>
             )}
           </div>
 
@@ -379,26 +533,21 @@ export default function Calendar() {
         </div>
       </div>
 
-      {/* Task Modal */}
-      <AddTaskModal
-        isOpen={isAddTaskModalOpen}
-        onClose={() => {
-          setIsAddTaskModalOpen(false);
-          setEditingTask(null);
-        }}
-        onSave={editingTask ? handleEditTask : handleAddTask}
-        initialTask={editingTask ? {
-          title: editingTask.title,
-          startDate: new Date(editingTask.startDate),
-          duration: editingTask.duration,
-          tags: editingTask.tags.map(tag => tag.name),
-          description: editingTask.description,
-          maxTimePerSitting: editingTask.maxTimePerSitting,
-          isAutoScheduled: editingTask.isAutoScheduled,
-          deadline: editingTask.deadline ? new Date(editingTask.deadline) : undefined,
-        } : undefined}
-        existingTags={Array.from(new Set(tasks.flatMap(task => task.tags.map(tag => tag.name))))}
-      />
+        {/* Add Task Modal */}
+        <AddTaskModal
+          isOpen={isAddTaskModalOpen}
+          onClose={() => setIsAddTaskModalOpen(false)}
+          onSave={handleAddTask}
+        />
+        {selectedTask && (
+          <EditTaskModal
+            isOpen={isEditTaskModalOpen}
+            onClose={() => setIsEditTaskModalOpen(false)}
+            onSave={handleEditTask}
+            task={selectedTask}
+          />
+        )}
+      </div>
     </div>
   );
 } 
